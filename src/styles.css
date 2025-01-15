@@ -1,0 +1,20 @@
+body {
+    margin: 0;
+    padding: 0;
+    font-family: Arial, sans-serif;
+    background-color: #f4f7f6;
+    direction: rtl; /* יישור מימין לשמאל */
+}
+
+button {
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+button:hover {
+    background-color: #1c73e8;
+}
+
+.menuItem {
+    text-align: right; /* יישור טקסט מימין לשמאל */
+}
