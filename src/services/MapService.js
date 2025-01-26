@@ -3,10 +3,10 @@ import { getMarkedTrailRoute } from './LocalOSRMService';
 // Map configuration
 export const MAP_CONFIG = {
     center: [31.5, 35.0], // מרכז ישראל
-    zoom: 7, // הקטנת הזום מ-8 ל-7
+    zoom: 8, // הקטנת הזום מ-7 ל-8
     bounds: {
         north: 33.4, // הקטנת הגבול הצפוני
-        south: 29.8, // העלאת הגבול הדרומי
+        south: 29.3, // העלאת הגבול הדרומי
         east: 35.9,  // השארת הגבול המזרחי
         west: 34.2   // השארת הגבול המערבי
     },
@@ -23,7 +23,6 @@ export const MAP_CONFIG = {
         }
     },
     osrmConfig: {
-        localUrl: '/osrm',
         profile: 'foot',
         options: {
             geometries: 'polyline',
@@ -226,18 +225,59 @@ export const MapService = {
     },
 
     // Calculate hiking route
-    calculateHikingRoute: async (startCoords, endCoords, waypoints = []) => {
+    async calculateHikingRoute(startCoords, endCoords, waypoints = []) {
         try {
-            const route = await getMarkedTrailRoute(startCoords, endCoords, waypoints);
-            return {
-                ...route,
-                properties: {
-                    ...route.properties,
-                    isMarkedTrail: true
+            console.log('MapService - Calculating route with:', { startCoords, endCoords, waypoints });
+
+            // בדיקה שכל הנקודות בתוך גבולות ישראל
+            const checkPoint = ([lat, lon]) => {
+                const israelBounds = {
+                    south: 29.4,  // אילת
+                    west: 34.2,   // מערב הנגב
+                    north: 33.4,  // הר דב
+                    east: 35.9    // רמת הגולן
+                };
+
+                if (lat < israelBounds.south || lat > israelBounds.north ||
+                    lon < israelBounds.west || lon > israelBounds.east) {
+                    console.warn(`Point [${lat}, ${lon}] is outside Israel's bounds`);
+                    return false;
                 }
+                return true;
             };
+
+            // בדיקת הקואורדינטות
+            if (!checkPoint(startCoords)) {
+                throw new Error(`Start point [${startCoords.join(', ')}] is invalid`);
+            }
+            if (!checkPoint(endCoords)) {
+                throw new Error(`End point [${endCoords.join(', ')}] is invalid`);
+            }
+            waypoints.forEach((point, index) => {
+                if (!checkPoint(point)) {
+                    throw new Error(`Waypoint ${index} [${point.join(', ')}] is invalid`);
+                }
+            });
+
+            // קבלת המסלול מה-API
+            const route = await getMarkedTrailRoute(startCoords, endCoords, waypoints);
+            console.log('MapService - Received route from API:', route);
+            
+            if (!route || !route.geometry || !route.geometry.coordinates) {
+                console.error('MapService - Invalid route response:', route);
+                throw new Error('Invalid route response');
+            }
+
+            // בדיקה שהמסלול מכיל לפחות 2 נקודות
+            if (route.geometry.coordinates.length < 2) {
+                console.error('MapService - Route has less than 2 points:', route);
+                throw new Error('Route must have at least 2 points');
+            }
+
+            return route;
+
         } catch (error) {
-            console.error('Error calculating hiking route:', error);
+            console.error('MapService - Error in calculateHikingRoute:', error);
             throw error;
         }
     },
@@ -362,5 +402,56 @@ export const MapService = {
             totalDuration: 0,
             totalElevation: { ascent: 0, descent: 0 }
         });
+    }
+};
+
+// גבולות ישראל
+const israelBounds = MAP_CONFIG.bounds;
+
+// פונקציה לבדיקה אם נקודה נמצאת בתוך גבולות ישראל
+const isPointInIsrael = (lat, lon) => {
+    return lat >= israelBounds.south && 
+           lat <= israelBounds.north && 
+           lon >= israelBounds.west && 
+           lon <= israelBounds.east;
+};
+
+// פונקציה להמרת קואורדינטות למבנה הנכון
+const formatCoordinates = (coords) => {
+    // coords מגיע כ-[lon, lat]
+    const [lon, lat] = coords;
+    return { lat, lon };
+};
+
+// פונקציה לחישוב מסלול
+export const calculateHikingRouteNew = async (startCoords, endCoords, waypoints = []) => {
+    try {
+        console.log('Calculating hiking route:', { startCoords, endCoords, waypoints });
+
+        // המרת הקואורדינטות למבנה הנכון
+        const start = formatCoordinates(startCoords);
+        const end = formatCoordinates(endCoords);
+        
+        // בדיקה שהנקודות בתוך ישראל
+        if (!isPointInIsrael(start.lat, start.lon)) {
+            throw new Error('Start point is outside Israel');
+        }
+        if (!isPointInIsrael(end.lat, end.lon)) {
+            throw new Error('End point is outside Israel');
+        }
+
+        // בדיקת נקודות הביניים
+        for (const point of waypoints) {
+            const { lat, lon } = formatCoordinates(point);
+            if (!isPointInIsrael(lat, lon)) {
+                throw new Error('Waypoint is outside Israel');
+            }
+        }
+
+        // חישוב המסלול
+        return await getMarkedTrailRoute(startCoords, endCoords, waypoints);
+    } catch (error) {
+        console.error('Error calculating hiking route:', error);
+        throw error;
     }
 };

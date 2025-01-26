@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer } from 'react';
+import React, { createContext, useContext, useReducer, useCallback } from 'react';
 
 const TripContext = createContext();
 
@@ -35,13 +35,10 @@ const initialState = {
 
 const tripReducer = (state, action) => {
     switch (action.type) {
-        case 'UPDATE_BASIC_DETAILS':
+        case 'SET_BASIC_DETAILS':
             return {
                 ...state,
-                basicDetails: {
-                    ...state.basicDetails,
-                    ...action.payload
-                }
+                basicDetails: action.payload
             };
         case 'UPDATE_ROUTE':
             return {
@@ -77,9 +74,21 @@ const tripReducer = (state, action) => {
 export const TripProvider = ({ children }) => {
     const [state, dispatch] = useReducer(tripReducer, initialState);
 
-    const updateBasicDetails = (details) => {
-        dispatch({ type: 'UPDATE_BASIC_DETAILS', payload: details });
-    };
+    const updateBasicDetails = useCallback((details) => {
+        if (!details) return;
+        
+        console.log('Updating basic details:', details);
+        dispatch({ 
+            type: 'SET_BASIC_DETAILS', 
+            payload: {
+                ...details,
+                dailyLocations: details.dailyLocations?.map(day => ({
+                    ...day,
+                    locations: Array.isArray(day.locations) ? day.locations : []
+                })) || []
+            }
+        });
+    }, [dispatch]);
 
     const updateRoute = (route) => {
         dispatch({ type: 'UPDATE_ROUTE', payload: route });

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useContext, useCallback, useMemo } 
 import { Box, Alert, Paper, Typography, CircularProgress, Tabs, Tab, TextField, IconButton, Menu, MenuItem, Button, Autocomplete } from '@mui/material';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, ZoomControl, useMap, LayerGroup, LayersControl } from 'react-leaflet';
 import L from 'leaflet';
+import { decode } from '@mapbox/polyline';
 import { MapService, MAP_CONFIG } from '../../services/MapService';
 import { LocalOSRMService } from '../../services/LocalOSRMService';
 import EditIcon from '@mui/icons-material/Edit';
@@ -288,15 +289,26 @@ const DraggableMarker = ({ position, onPositionChange, dayIndex, pointIndex, poi
         <div style={{ width: '250px' }}>
           <Autocomplete
             value={selectedLocation}
-            onChange={(event, newValue) => handleLocationSelect(newValue)}
+            options={searchResults}
+            getOptionLabel={(option) => option?.display_name || ''}
+            isOptionEqualToValue={(option, value) => {
+              if (!option || !value) return false;
+              return option.place_id === value.place_id;
+            }}
+            onChange={(event, newValue) => {
+              if (newValue) {
+                setSelectedLocation(newValue);
+                const [lat, lon] = [parseFloat(newValue.lat), parseFloat(newValue.lon)];
+                if (!isNaN(lat) && !isNaN(lon)) {
+                  onPositionChange([lat, lon]);
+                }
+              }
+            }}
             onInputChange={(event, newValue) => {
               setInputValue(newValue);
               handleSearch(newValue);
             }}
             inputValue={inputValue}
-            options={searchResults}
-            getOptionLabel={(option) => option?.name || ''}
-            isOptionEqualToValue={isOptionEqualToValue}
             renderInput={(params) => (
               <TextField
                 {...params}
@@ -310,7 +322,7 @@ const DraggableMarker = ({ position, onPositionChange, dayIndex, pointIndex, poi
             renderOption={(props, option) => (
               <li {...props}>
                 <div>
-                  <Typography variant="subtitle1">{option.name}</Typography>
+                  <Typography variant="subtitle1">{option.display_name}</Typography>
                   <Typography variant="body2" color="textSecondary">
                     {option.address}
                   </Typography>
@@ -365,11 +377,11 @@ const RouteMarkers = ({ route }) => {
             <Typography variant="subtitle2">
               {isEndpoint ? (index === 0 ? 'נקודת התחלה' : 'נקודת סיום') : 'נקודת ציון'}
             </Typography>
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="textSecondary">
               {coord[1].toFixed(6)}°N, {coord[0].toFixed(6)}°E
             </Typography>
             {elevation !== null && (
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="body2" color="textSecondary">
                 גובה: {Math.round(elevation)} מטר
               </Typography>
             )}
@@ -380,9 +392,82 @@ const RouteMarkers = ({ route }) => {
   }).filter(Boolean);  // סינון ערכים null
 };
 
+// רכיב להצגת המסלולים על המפה
+const RouteDisplay = ({ routes }) => {
+    const map = useMap();
+
+    useEffect(() => {
+      if (!map) return;
+
+      // מחיקת שכבות קודמות
+      map.eachLayer((layer) => {
+        if (layer._path) map.removeLayer(layer);
+      });
+
+      if (!routes || routes.length === 0) return;
+
+      routes.forEach((route, index) => {
+        if (!route?.geometry?.coordinates) return;
+
+        try {
+          // יצירת הצל
+          const shadow = L.polyline(route.geometry.coordinates, {
+            color: '#000',
+            opacity: 0.3,
+            weight: 8,
+            lineJoin: 'round',
+            lineCap: 'round'
+          }).addTo(map);
+
+          // יצירת הקו העיקרי
+          const polyline = L.polyline(route.geometry.coordinates, {
+            color: '#2196F3', // כחול מטריאל
+            weight: 5,
+            opacity: 0.8,
+            lineJoin: 'round',
+            lineCap: 'round',
+            className: 'route-line' // לאנימציה
+          }).addTo(map);
+
+          // הוספת חלון מידע
+          if (route.properties) {
+            const distanceKm = (route.properties.distance / 1000).toFixed(1);
+            const timeHours = (route.properties.time / 3600).toFixed(1);
+            
+            polyline.bindPopup(`
+              <div dir="rtl" style="text-align: right; font-family: system-ui;">
+                <div style="font-weight: bold; margin-bottom: 8px;">פרטי המסלול:</div>
+                <div>🚶 מרחק: ${distanceKm} ק"מ</div>
+                <div>⏱️ זמן משוער: ${timeHours} שעות</div>
+              </div>
+            `, {
+              className: 'route-popup'
+            });
+          }
+
+          // התאמת התצוגה למסלול הראשון
+          if (index === 0) {
+            const bounds = polyline.getBounds();
+            map.fitBounds(bounds, { 
+              padding: [50, 50],
+              maxZoom: 16
+            });
+          }
+
+        } catch (error) {
+          console.error(`Error creating route display:`, error);
+        }
+      });
+
+    }, [map, routes]);
+
+    return null;
+  };
+
 const MapPlanning = () => {
   const [selectedTab, setSelectedTab] = useState(0);
   const [dailyRoutes, setDailyRoutes] = useState([]);
+  const [calculatedRoutes, setCalculatedRoutes] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const { state, updateBasicDetails } = useTrip();
@@ -395,18 +480,66 @@ const MapPlanning = () => {
     [MAP_CONFIG.bounds.north, MAP_CONFIG.bounds.east]  // Northeast coordinates
   ];
 
-  console.log('Updating daily routes from state:', state?.basicDetails?.dailyLocations);
+  // אתחול המפה והמסלולים
   useEffect(() => {
-    if (state?.basicDetails?.dailyLocations) {
-      const routes = state.basicDetails.dailyLocations.map(day => ({
-        locations: Array.isArray(day.locations) ? day.locations : [],
-        route: day.route || null
-      }));
-      setDailyRoutes(routes);
-    } else {
-      setDailyRoutes([]);
+    const initializeMap = async () => {
+      if (state?.basicDetails?.dailyLocations) {
+        setIsLoading(true);
+        try {
+          console.log('Initializing map with daily locations:', state.basicDetails.dailyLocations);
+          await calculateDailyRoutes(state.basicDetails.dailyLocations);
+        } catch (error) {
+          console.error('Error initializing map:', error);
+          setError('אירעה שגיאה באתחול המפה');
+        } finally {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    initializeMap();
+  }, [state.basicDetails?.dailyLocations]);
+
+  // מעבר בין שלבים
+  const handleTabChange = async (event, newValue) => {
+    try {
+      setError(null);
+      
+      // בדיקה שיש מספיק נקודות לפני המעבר לשלב 2
+      if (newValue === 1) {
+        const locations = state.basicDetails?.dailyLocations || [];
+        const hasValidLocations = locations.some(day => 
+          day?.locations?.length >= 2 && 
+          day.locations.every(loc => 
+            loc && 
+            Array.isArray(loc.coordinates) && 
+            loc.coordinates.length === 2
+          )
+        );
+
+        if (!hasValidLocations) {
+          setError('יש להוסיף לפחות שתי נקודות ליום אחד לפני המעבר לשלב הבא');
+          return;
+        }
+
+        setIsLoading(true);
+        try {
+          await calculateDailyRoutes(state.basicDetails.dailyLocations);
+          setSelectedTab(newValue);
+        } catch (error) {
+          console.error('Error calculating routes:', error);
+          setError('אירעה שגיאה בחישוב המסלולים. אנא נסה שוב.');
+        } finally {
+          setIsLoading(false);
+        }
+      } else {
+        setSelectedTab(newValue);
+      }
+    } catch (error) {
+      console.error('Error changing tab:', error);
+      setError('אירעה שגיאה במעבר בין השלבים. אנא נסה שוב.');
     }
-  }, [state?.basicDetails?.dailyLocations]);
+  };
 
   const handleMarkerDragEnd = useCallback(async (dayIndex, pointIndex, newLatLng) => {
     try {
@@ -433,9 +566,9 @@ const MapPlanning = () => {
       if (day.locations.length >= 2) {
         try {
           const route = await MapService.calculateHikingRoute(
-            day.locations[0].coordinates,
-            day.locations[day.locations.length - 1].coordinates,
-            day.locations.slice(1, -1).map(loc => loc.coordinates)
+            [day.locations[0].coordinates[0], day.locations[0].coordinates[1]], // המרה ל-[lon, lat]
+            [day.locations[day.locations.length - 1].coordinates[0], day.locations[day.locations.length - 1].coordinates[1]], // המרה ל-[lon, lat]
+            day.locations.slice(1, -1).map(loc => [loc.coordinates[0], loc.coordinates[1]]) // המרה ל-[lon, lat]
           );
           day.route = route;
         } catch (error) {
@@ -497,6 +630,110 @@ const MapPlanning = () => {
     });
   }, [calculateDayDetails]);
 
+  // חישוב המסלולים
+  const calculateDailyRoutes = async (locations) => {
+    try {
+      if (!locations || locations.length === 0) {
+        console.log('No locations provided');
+        return;
+      }
+
+      console.log('Starting route calculations with locations:', locations);
+      setIsLoading(true);
+      setError(null);
+      setCalculatedRoutes([]); // איפוס המסלולים הקודמים
+
+      const results = [];
+
+      // עיבוד כל יום בנפרד
+      for (let dayIndex = 0; dayIndex < locations.length; dayIndex++) {
+        const day = locations[dayIndex];
+        console.log(`Processing day ${dayIndex}:`, day);
+
+        if (!day || !day.locations || day.locations.length < 2) {
+          console.log(`Not enough locations for day ${dayIndex}`);
+          continue;
+        }
+
+        // סינון נקודות לא תקינות
+        const validLocations = day.locations.filter(loc => 
+          loc && loc.coordinates && 
+          Array.isArray(loc.coordinates) && 
+          loc.coordinates.length === 2 &&
+          !isNaN(loc.coordinates[0]) && 
+          !isNaN(loc.coordinates[1])
+        );
+
+        console.log(`Valid locations for day ${dayIndex}:`, validLocations);
+
+        if (validLocations.length < 2) {
+          console.log(`Not enough valid locations for day ${dayIndex}`);
+          continue;
+        }
+
+        // חישוב המסלול בין כל זוג נקודות עוקבות
+        for (let i = 0; i < validLocations.length - 1; i++) {
+          const start = validLocations[i];
+          const end = validLocations[i + 1];
+          
+          console.log(`Calculating route from ${start.name} to ${end.name}`);
+          
+          try {
+            const route = await MapService.calculateHikingRoute(
+              start.coordinates,
+              end.coordinates,
+              [] // אין נקודות ביניים
+            );
+
+            if (route && route.geometry && route.geometry.coordinates) {
+              console.log(`Route calculated successfully:`, route);
+              results.push(route);
+            } else {
+              console.warn(`Invalid route data:`, route);
+            }
+          } catch (error) {
+            console.error(`Error calculating route segment:`, error);
+            setError(`שגיאה בחישוב המסלול בין ${start.name} ל-${end.name}: ${error.message}`);
+          }
+        }
+      }
+
+      console.log('All routes calculated:', results);
+      if (results.length > 0) {
+        setCalculatedRoutes(results);
+      }
+
+    } catch (error) {
+      console.error('Error in calculateDailyRoutes:', error);
+      setError('אירעה שגיאה בחישוב המסלולים');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleLocationChange = useCallback((dayIndex, locationIndex, newLocation) => {
+    const currentLocations = state.basicDetails?.dailyLocations || [];
+    const currentLocation = currentLocations[dayIndex]?.locations[locationIndex];
+
+    // בדיקה אם יש שינוי אמיתי במיקום
+    if (currentLocation && newLocation && 
+        currentLocation.coordinates?.lat === newLocation.coordinates?.lat && 
+        currentLocation.coordinates?.lng === newLocation.coordinates?.lng) {
+        return;
+    }
+
+    const updatedLocations = [...currentLocations];
+    if (!updatedLocations[dayIndex]) {
+        updatedLocations[dayIndex] = { locations: [] };
+    }
+    updatedLocations[dayIndex].locations[locationIndex] = newLocation;
+
+    updateBasicDetails({
+        ...state.basicDetails,
+        dailyLocations: updatedLocations
+    });
+  }, [state.basicDetails, updateBasicDetails]);
+
   // הגדרת גבולות ישראל
   const getBoundsFromCoordinates = (coordinates) => {
     if (!coordinates || coordinates.length === 0) {
@@ -544,141 +781,198 @@ const MapPlanning = () => {
     return dayBounds || israelBounds;
   }, [selectedTab, dailyRoutes]);
 
-  const handleTabChange = (event, newValue) => {
-    setSelectedTab(newValue);
+  const renderRoutes = useMemo(() => {
+    if (!calculatedRoutes || calculatedRoutes.length === 0) return null;
+
+    return calculatedRoutes.map((route, index) => {
+      if (!route || !route.geometry) return null;
+
+      // צבעים שונים לכל יום
+      const colors = ['#FF4136', '#2ECC40', '#0074D9', '#B10DC9', '#FF851B', '#7FDBFF'];
+      const color = colors[index % colors.length];
+
+      // המרת הקואורדינטות לפורמט הנכון
+      let positions;
+      if (route.geometry.type === 'LineString') {
+        positions = route.geometry.coordinates.map(coord => [coord[1], coord[0]]);
+      } else if (Array.isArray(route.geometry)) {
+        positions = route.geometry.map(coord => [coord[1], coord[0]]);
+      } else {
+        console.error('Invalid route geometry:', route.geometry);
+        return null;
+      }
+
+      return (
+        <Polyline
+          key={`route-${index}`}
+          positions={positions}
+          pathOptions={{
+            color: color,
+            weight: 4,
+            opacity: 0.8,
+            dashArray: null,
+            lineCap: 'round',
+            lineJoin: 'round'
+          }}
+        >
+          <Popup>
+            <div style={{ direction: 'rtl', textAlign: 'right' }}>
+              <strong>יום {index + 1}</strong>
+              <br />
+              מרחק: {(route.properties.distance / 1000).toFixed(1)} ק"מ
+              <br />
+              זמן משוער: {Math.round(route.properties.duration / 60)} דקות
+              {route.properties.elevation && (
+                <>
+                  <br />
+                  עלייה מצטברת: {route.properties.elevation.ascent} מ'
+                  <br />
+                  ירידה מצטברת: {route.properties.elevation.descent} מ'
+                </>
+              )}
+            </div>
+          </Popup>
+        </Polyline>
+      );
+    });
+  }, [calculatedRoutes]);
+
+  const calculateDayRoute = async (dayLocations) => {
+    try {
+      if (!dayLocations || dayLocations.length < 2) {
+        console.log('Not enough locations for route calculation');
+        return null;
+      }
+
+      // סינון מיקומים לא תקינים
+      const validLocations = dayLocations.filter(loc => 
+        loc && loc.coordinates && 
+        Array.isArray(loc.coordinates) && 
+        loc.coordinates.length === 2
+      );
+
+      if (validLocations.length < 2) {
+        console.log('Not enough valid locations after filtering');
+        return null;
+      }
+
+      const start = validLocations[0].coordinates;
+      const end = validLocations[validLocations.length - 1].coordinates;
+      const waypoints = validLocations.slice(1, -1).map(loc => loc.coordinates);
+
+      console.log('Using coordinates:', { start, end, waypoints });
+      
+      const route = await MapService.calculateHikingRoute(start, end, waypoints);
+      return route;
+    } catch (error) {
+      console.error('Error calculating route for day:', error);
+      return null;
+    }
+  };
+
+  const handleStepChange = async (step) => {
+    console.log('Changing to step:', step);
+    
+    if (step === 2) {
+      // בשלב 2, נחשב את המסלולים
+      console.log('Step 2 - Calculating routes for:', state.basicDetails.dailyLocations);
+      await calculateDailyRoutes(state.basicDetails.dailyLocations);
+    }
+    
+    setSelectedTab(step);
   };
 
   return (
-    <Box sx={{ 
-      height: 'calc(100vh - 200px)', 
-      width: '100%', 
-      position: 'relative', 
-      display: 'flex', 
-      flexDirection: 'column',
-      margin: '16px 0'
-    }}>
-      {dailyRoutes.length > 0 && (
-        <Tabs
-          value={selectedTab}
-          onChange={handleTabChange}
-          sx={{ mb: 2 }}
-          variant="scrollable"
-          scrollButtons="auto"
-        >
-          {dailyRoutes.map((_, index) => (
-            <Tab key={index} label={`יום ${index + 1}`} />
-          ))}
-          <Tab label="מסלול מלא" />
-        </Tabs>
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
       )}
-
-      <Box sx={{ flex: 1, display: 'flex' }}>
+      
+      <Paper sx={{ 
+        flexGrow: 1, 
+        position: 'relative', 
+        overflow: 'hidden',
+        height: 'calc(100vh - 200px)', // גובה קבוע למפה
+        '& .leaflet-container': {
+          height: '100%',
+          width: '100%',
+          zIndex: 1
+        }
+      }}>
         {isLoading && (
-          <Box sx={{ 
-            position: 'absolute', 
-            top: '50%', 
-            left: '50%', 
-            transform: 'translate(-50%, -50%)',
-            zIndex: 1000,
-            textAlign: 'center',
-            bgcolor: 'background.paper',
-            p: 2,
-            borderRadius: 1,
-            boxShadow: 3
-          }}>
+          <Box
+            sx={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              zIndex: 1000,
+              backgroundColor: 'rgba(255, 255, 255, 0.8)',
+              padding: 2,
+              borderRadius: 1
+            }}
+          >
             <CircularProgress />
-            <Typography sx={{ mt: 1 }}>
-              מחשב מסלול...
-            </Typography>
           </Box>
         )}
         
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
-            {error}
-          </Alert>
-        )}
-
-        <Box sx={{ flex: 1, position: 'relative' }}>
-          <MapContainer
-            key={dailyRoutes.length > 0 ? 'with-routes' : 'empty'}
-            center={defaultCenter}
-            zoom={defaultZoom}
-            minZoom={7}
+        <MapContainer
+          center={[31.7767, 35.2345]}
+          zoom={8}
+          style={{ height: "100%", width: "100%" }}
+        >
+          <TileLayer
+            url="https://israelhiking.osm.org.il/Tiles/{z}/{x}/{y}.png"
+            attribution='מפה: <a href="https://israelhiking.osm.org.il">Israel Hiking Map</a>'
             maxZoom={16}
-            scrollWheelZoom={true}
-            style={{ height: '100%', width: '100%', backgroundColor: '#f8f9fa' }}
-            maxBounds={israelBounds}
-          >
-            <LayersControl position="topright">
-              {/* Base Layer */}
-              <LayersControl.BaseLayer name="מפת טיולים" checked={true}>
-                <TileLayer
-                  url={MAP_CONFIG.layers.base.hiking.url}
-                  attribution={MAP_CONFIG.layers.base.hiking.attribution}
-                />
-              </LayersControl.BaseLayer>
-              
-              {/* OpenStreetMap Layer */}
-              <LayersControl.BaseLayer name="OpenStreetMap">
-                <TileLayer
-                  url={MAP_CONFIG.layers.base.osm.url}
-                  attribution={MAP_CONFIG.layers.base.osm.attribution}
-                />
-              </LayersControl.BaseLayer>
-            </LayersControl>
+            minZoom={7}
+          />
+          
+          <MapController bounds={null} />
+          <RouteDisplay routes={calculatedRoutes} />
+          
+          {/* הצגת המסלולים והנקודות */}
+          {state.basicDetails?.dailyLocations?.map((day, dayIndex) => (
+            <React.Fragment key={`day-${dayIndex}`}>
+              {/* הצגת הנקודות */}
+              {day.locations?.map((location, locationIndex) => {
+                if (!location?.coordinates) return null;
 
-            <ZoomControl position="bottomright" />
-            <MapController bounds={bounds} />
-            
-            {selectedTab < dailyRoutes.length && dailyRoutes[selectedTab] && (
-              <>
-                {/* הצגת המסלול */}
-                {dailyRoutes[selectedTab]?.route?.geometry?.coordinates?.length > 0 && (
-                  <Polyline
-                    positions={dailyRoutes[selectedTab].route.geometry.coordinates.map(coord => 
-                      Array.isArray(coord) && coord.length >= 2 ? [coord[1], coord[0]] : null
-                    ).filter(Boolean)}
-                    pathOptions={{
-                      color: '#FF4400',
-                      weight: 4,
-                      opacity: 0.8,
-                      dashArray: '10, 10',
-                      lineCap: 'round'
-                    }}
-                  />
-                )}
-
-                {/* הצגת נקודות המסלול */}
-                {Array.isArray(dailyRoutes[selectedTab]?.locations) && dailyRoutes[selectedTab].locations.map((location, index) => (
-                  location?.coordinates?.length >= 2 && (
-                    <DraggableMarker
-                      key={`location-${index}`}
-                      position={location.coordinates}
-                      onPositionChange={(pos) => handleMarkerDragEnd(selectedTab, index, pos)}
-                      dayIndex={selectedTab}
-                      pointIndex={index}
-                      pointDetails={location}
-                    />
-                  )
-                ))}
-
-                {/* הצגת נקודות משמעותיות במסלול */}
-                {dailyRoutes[selectedTab]?.route && (
-                  <RouteMarkers route={dailyRoutes[selectedTab].route} />
-                )}
-              </>
-            )}
-          </MapContainer>
-        </Box>
-
-        {dailyRoutes.length > 0 && (
-          selectedTab === dailyRoutes.length ? (
-            <RouteDetails routes={dailyRoutes} isFullTrip={true} />
-          ) : (
-            <RouteDetails routes={[dailyRoutes[selectedTab]]} isFullTrip={false} />
-          )
-        )}
+                return (
+                  <DraggableMarker
+                    key={`marker-${dayIndex}-${locationIndex}`}
+                    position={location.coordinates}
+                    onPositionChange={(newLatLng) => handleMarkerDragEnd(dayIndex, locationIndex, newLatLng)}
+                    dayIndex={dayIndex}
+                    locationIndex={locationIndex}
+                    pointDetails={location}
+                    icon={
+                      locationIndex === 0
+                        ? startMarkerIcon
+                        : locationIndex === day.locations.length - 1
+                        ? endMarkerIcon
+                        : waypointIcon
+                    }
+                  >
+                    <Popup>
+                      <div>
+                        <strong>{location.name}</strong>
+                        <br />
+                        {location.address}
+                      </div>
+                    </Popup>
+                  </DraggableMarker>
+                );
+              })}
+            </React.Fragment>
+          ))}
+        </MapContainer>
+      </Paper>
+      
+      <Box sx={{ mt: 2 }}>
+        <RouteDetails routes={dailyRoutes} />
       </Box>
     </Box>
   );

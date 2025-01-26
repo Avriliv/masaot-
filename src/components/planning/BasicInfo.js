@@ -1,52 +1,46 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { useTrip } from '../../context/TripContext';
 import { debounce } from 'lodash';
-import { Box, Paper, Snackbar, Alert, Grid, TextField, Autocomplete } from '@mui/material';
+import { Box, TextField, Button, IconButton, Typography, Grid, Autocomplete, CircularProgress, Snackbar, Alert } from '@mui/material';
+import AddLocationIcon from '@mui/icons-material/AddLocation';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { locationSearchCache } from '../../services/LocationSearchCache';
 import DailyLocationsRenderer from './DailyLocationsRenderer';
 import TripDetailsForm from './TripDetailsForm';
 
 const BasicInfo = ({ onSubmit }) => {
     const { state, updateBasicDetails } = useTrip();
-    const [formData, setFormData] = useState({
+    const [formData, setFormData] = useState(() => ({
         tripName: state?.basicDetails?.tripName || '',
         startDate: state?.basicDetails?.startDate || '',
         endDate: state?.basicDetails?.endDate || '',
-        numDays: state?.basicDetails?.numDays || '',
-        gradeFrom: state?.basicDetails?.gradeFrom || '',
-        gradeTo: state?.basicDetails?.gradeTo || '',
-        organizationType: state?.basicDetails?.organizationType || '',
-        organization: state?.basicDetails?.organization || '',
-        numStudents: state?.basicDetails?.numStudents || '',
-        numStaff: state?.basicDetails?.numStaff || '',
-        description: state?.basicDetails?.description || '',
-        dailyLocations: state?.basicDetails?.dailyLocations || []
-    });
+        dailyLocations: state?.basicDetails?.dailyLocations || [{ locations: [] }] // אתחול עם יום ראשון
+    }));
 
     const [locations, setLocations] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [searchText, setSearchText] = useState('');
 
-    // עדכון הטופס כשהנתונים משתנים בקונטקסט
+    // עדכון ה-context רק כשיש שינוי אמיתי ב-formData
     useEffect(() => {
-        if (state?.basicDetails) {
-            setFormData({
-                tripName: state.basicDetails.tripName || '',
-                startDate: state.basicDetails.startDate || '',
-                endDate: state.basicDetails.endDate || '',
-                numDays: state.basicDetails.numDays || '',
-                gradeFrom: state.basicDetails.gradeFrom || '',
-                gradeTo: state.basicDetails.gradeTo || '',
-                organizationType: state.basicDetails.organizationType || '',
-                organization: state.basicDetails.organization || '',
-                numStudents: state.basicDetails.numStudents || '',
-                numStaff: state.basicDetails.numStaff || '',
-                description: state.basicDetails.description || '',
-                dailyLocations: state.basicDetails.dailyLocations || []
-            });
+        const currentStateStr = JSON.stringify(state?.basicDetails);
+        const formDataStr = JSON.stringify(formData);
+        
+        if (currentStateStr !== formDataStr) {
+            updateBasicDetails(formData);
         }
-    }, [state?.basicDetails]);
+    }, [formData, state?.basicDetails, updateBasicDetails]);
+
+    // הוספת יום ראשון אם אין ימים
+    useEffect(() => {
+        if (!formData.dailyLocations || formData.dailyLocations.length === 0) {
+            setFormData(prev => ({
+                ...prev,
+                dailyLocations: [{ locations: [] }]
+            }));
+        }
+    }, []);
 
     // חישוב שגיאות תאריכים
     const { startDateError, endDateError } = useMemo(() => {
@@ -63,40 +57,150 @@ const BasicInfo = ({ onSubmit }) => {
         };
     }, [formData.startDate, formData.endDate]);
 
+    // פונקציה להשוואת אופציות ב-Autocomplete
+    const isOptionEqualToValue = useCallback((option, value) => {
+        if (!option && !value) return true;
+        if (!option || !value) return false;
+        // השוואה לפי id
+        return option.id === value.id;
+    }, []);
+
     // טיפול בשינוי שדות
     const handleInputChange = useCallback((field) => (value) => {
-        const newData = { ...formData };
-
-        if (field === 'startDate' || field === 'endDate') {
-            newData[field] = value;
-            if (newData.startDate && newData.endDate) {
-                const start = new Date(newData.startDate);
-                const end = new Date(newData.endDate);
-                const diffTime = Math.abs(end - start);
-                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-                newData.numDays = diffDays.toString();
+        setFormData(prevData => {
+            // אם אין שינוי בערך, לא לעדכן את ה-state
+            if (prevData[field] === value) {
+                return prevData;
             }
-        } else {
-            newData[field] = value;
-        }
 
-        setFormData(newData);
-        updateBasicDetails(newData);
-    }, [formData, updateBasicDetails]);
+            const newData = {
+                ...prevData,
+                [field]: value
+            };
+
+            // אם יש תאריך התחלה וסיום, נוודא שיש יום ראשון עם שני מיקומים
+            if ((field === 'startDate' || field === 'endDate') && 
+                newData.startDate && newData.endDate && 
+                (!newData.dailyLocations || newData.dailyLocations.length === 0)) {
+                newData.dailyLocations = [{
+                    locations: [null, null] // מיקום התחלה וסיום
+                }];
+            }
+
+            return newData;
+        });
+    }, []);
+
+    // הוספת יום חדש
+    const handleAddDay = useCallback(() => {
+        setFormData(prevData => ({
+            ...prevData,
+            dailyLocations: [...prevData.dailyLocations, { locations: [] }]
+        }));
+    }, []);
+
+    // הסרת יום
+    const handleRemoveDay = useCallback((dayIndex) => {
+        setFormData(prevData => ({
+            ...prevData,
+            dailyLocations: prevData.dailyLocations.filter((_, idx) => idx !== dayIndex)
+        }));
+    }, []);
+
+    // הוספת מיקום ליום
+    const handleAddLocation = useCallback((dayIndex) => {
+        setFormData(prevData => {
+            const newDailyLocations = [...prevData.dailyLocations];
+            if (!newDailyLocations[dayIndex]) {
+                newDailyLocations[dayIndex] = { locations: [] };
+            }
+            if (!Array.isArray(newDailyLocations[dayIndex].locations)) {
+                newDailyLocations[dayIndex].locations = [];
+            }
+            newDailyLocations[dayIndex].locations.push(null);
+            return {
+                ...prevData,
+                dailyLocations: newDailyLocations
+            };
+        });
+    }, []);
+
+    // הסרת מיקום מיום
+    const handleRemoveLocation = useCallback((dayIndex, locationIndex) => {
+        setFormData(prevData => {
+            const newDailyLocations = [...prevData.dailyLocations];
+            if (newDailyLocations[dayIndex]?.locations?.length > 1) {
+                newDailyLocations[dayIndex].locations = newDailyLocations[dayIndex].locations.filter((_, idx) => idx !== locationIndex);
+            }
+            return {
+                ...prevData,
+                dailyLocations: newDailyLocations
+            };
+        });
+    }, []);
+
+    // טיפול בשינוי מיקום
+    const handleLocationChange = useCallback((dayIndex, locationIndex, newValue) => {
+        console.log('Location change:', { dayIndex, locationIndex, newValue });
+        
+        setFormData(prevData => {
+            const newDailyLocations = [...prevData.dailyLocations];
+            
+            // וידוא שיש מערך מיקומים ליום הנוכחי
+            if (!newDailyLocations[dayIndex]) {
+                newDailyLocations[dayIndex] = { locations: [] };
+            }
+            
+            if (!newDailyLocations[dayIndex].locations) {
+                newDailyLocations[dayIndex].locations = [];
+            }
+
+            // עדכון המיקום
+            if (newValue) {
+                // המרת הקואורדינטות למערך [lon, lat]
+                const coordinates = Array.isArray(newValue.coordinates) 
+                    ? newValue.coordinates 
+                    : [newValue.coordinates[1], newValue.coordinates[0]];
+
+                newDailyLocations[dayIndex].locations[locationIndex] = {
+                    name: newValue.name,
+                    address: newValue.address,
+                    coordinates: coordinates,
+                    id: newValue.id || `temp-${Date.now()}`,
+                    type: newValue.type
+                };
+
+                console.log('Saved location with coordinates:', coordinates);
+            } else {
+                newDailyLocations[dayIndex].locations[locationIndex] = null;
+            }
+
+            console.log('Updated daily locations:', newDailyLocations);
+            
+            return {
+                ...prevData,
+                dailyLocations: newDailyLocations
+            };
+        });
+    }, []);
 
     // חיפוש מיקומים
     const searchLocations = useCallback(async (searchText) => {
-        if (!searchText || searchText.length < 2) return [];
+        if (!searchText || searchText.length < 2) {
+            setLocations([]);
+            return;
+        }
 
         try {
+            setLoading(true);
+            setError(null);
+
             const params = new URLSearchParams({
                 q: searchText,
                 format: 'json',
-                countrycodes: 'il',
                 limit: 10,
-                addressdetails: 1,
-                accept_language: 'he'
-            });
+                countrycodes: 'il'
+            }).toString();
 
             const response = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
                 headers: {
@@ -110,36 +214,22 @@ const BasicInfo = ({ onSubmit }) => {
 
             const data = await response.json();
             
-            // מסנן תוצאות לפי גבולות ישראל
-            const israelBounds = {
-                south: 29.4,  // אילת
-                west: 34.2,   // מערב הנגב
-                north: 33.4,  // הר דב
-                east: 35.9    // רמת הגולן
-            };
+            // המרת התוצאות לפורמט שלנו
+            const formattedLocations = data.map(item => ({
+                id: item.place_id,
+                name: item.display_name.split(',')[0],
+                address: item.display_name,
+                coordinates: [parseFloat(item.lat), parseFloat(item.lon)], // שמירה כ-[lat, lon]
+                type: item.type
+            }));
 
-            return data
-                .filter(item => {
-                    const lat = parseFloat(item.lat);
-                    const lon = parseFloat(item.lon);
-                    return lat >= israelBounds.south && 
-                           lat <= israelBounds.north && 
-                           lon >= israelBounds.west && 
-                           lon <= israelBounds.east;
-                })
-                .map(item => ({
-                    name: item.display_name.split(',')[0],
-                    address: item.display_name,
-                    id: parseInt(item.place_id),
-                    coordinates: [parseFloat(item.lon), parseFloat(item.lat)],
-                    type: item.type,
-                    category: item.category,
-                    importance: parseFloat(item.importance)
-                }));
+            setLocations(formattedLocations);
         } catch (error) {
             console.error('Error searching locations:', error);
             setError('אירעה שגיאה בחיפוש המיקומים');
-            return [];
+            setLocations([]);
+        } finally {
+            setLoading(false);
         }
     }, []);
 
@@ -168,48 +258,43 @@ const BasicInfo = ({ onSubmit }) => {
         [searchLocations]
     );
 
-    // טיפול בשינוי מיקום
-    const handleLocationChange = useCallback((dayIndex, locationType, newLocation) => {
-        const newDailyLocations = [...formData.dailyLocations];
-        
-        if (!newDailyLocations[dayIndex]) {
-            newDailyLocations[dayIndex] = { startLocation: null, endLocation: null };
+    // טיפול בשינוי טקסט בשדה החיפוש
+    const handleLocationInputChange = useCallback((event, value) => {
+        setSearchText(value);
+        if (value) {
+            searchLocations(value);
+        } else {
+            setLocations([]);
         }
+    }, [searchLocations]);
 
-        // עדכון המיקום הספציפי
-        newDailyLocations[dayIndex] = {
-            ...newDailyLocations[dayIndex],
-            [locationType]: newLocation
-        };
-
-        // עדכון ה-state המקומי וה-context
-        const newFormData = { ...formData, dailyLocations: newDailyLocations };
-        setFormData(newFormData);
-        updateBasicDetails(newFormData);
-    }, [formData, updateBasicDetails]);
-
-    // פונקציית השוואה מותאמת עבור האוטוקומפליט
-    const isOptionEqualToValue = (option, value) => {
-        // אם אחד מהערכים הוא null או undefined
-        if (!option || !value) return false;
+    // שמירת הטופס
+    const handleSubmit = async (event) => {
+        event.preventDefault();
+        console.log('Submitting form data:', formData);
         
-        // אם שניהם אובייקטים, נשווה לפי id
-        if (typeof option === 'object' && typeof value === 'object') {
-            return option.id === value.id;
+        try {
+            // וידוא שכל היומיים מכילים מערך מיקומים
+            const validatedDailyLocations = formData.dailyLocations.map(day => ({
+                locations: Array.isArray(day.locations) ? day.locations : []
+            }));
+
+            const basicDetails = {
+                ...formData,
+                dailyLocations: validatedDailyLocations
+            };
+
+            console.log('Saving basic details:', basicDetails);
+            updateBasicDetails(basicDetails);
+        } catch (error) {
+            console.error('Error saving form:', error);
+            setError('אירעה שגיאה בשמירת הטופס');
         }
-        
-        // אם שניהם מחרוזות, נשווה ישירות
-        if (typeof option === 'string' && typeof value === 'string') {
-            return option === value;
-        }
-        
-        // אם הגענו לכאן, הערכים לא תואמים
-        return false;
     };
 
     return (
-        <Box>
-            <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
+        <Box component="form" onSubmit={handleSubmit} sx={{ mt: 2 }}>
+            <Box elevation={2} sx={{ p: 3, mb: 3 }}>
                 {/* טופס פרטים בסיסיים */}
                 <Grid container spacing={3}>
                     <Grid item xs={12}>
@@ -230,7 +315,6 @@ const BasicInfo = ({ onSubmit }) => {
                             fullWidth
                             label="תאריך התחלה"
                             type="date"
-                            name="startDate"
                             value={formData.startDate || ''}
                             onChange={(e) => handleInputChange('startDate')(e.target.value)}
                             error={startDateError}
@@ -243,7 +327,6 @@ const BasicInfo = ({ onSubmit }) => {
                             fullWidth
                             label="תאריך סיום"
                             type="date"
-                            name="endDate"
                             value={formData.endDate || ''}
                             onChange={(e) => handleInputChange('endDate')(e.target.value)}
                             error={endDateError}
@@ -252,35 +335,113 @@ const BasicInfo = ({ onSubmit }) => {
                             disabled={!formData.startDate}
                         />
                     </Grid>
-                    <Grid item xs={12}>
-                        <TextField
-                            fullWidth
-                            label="מספר ימים"
-                            type="number"
-                            name="numDays"
-                            value={formData.numDays || ''}
-                            onChange={(e) => handleInputChange('numDays')(e.target.value)}
-                            disabled={!formData.startDate || !formData.endDate}
-                        />
-                    </Grid>
                 </Grid>
 
                 {/* מיקומים */}
-                {formData.startDate && formData.endDate && (
-                    <Box sx={{ mt: 3 }}>
-                        <DailyLocationsRenderer
-                            numDays={formData.numDays}
-                            dailyLocations={formData.dailyLocations}
-                            onLocationChange={handleLocationChange}
-                            locations={locations}
-                            loading={loading}
-                            onSearchChange={(event, value) => {
-                                setSearchText(value);
-                                debouncedSearch(value);
-                            }}
-                        />
-                    </Box>
-                )}
+                <Box sx={{ mt: 3 }}>
+                    {formData.dailyLocations.map((day, dayIndex) => (
+                        <Box key={`day-${dayIndex}`} sx={{ mb: 3, p: 2, border: '1px solid #e0e0e0', borderRadius: 1 }}>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                                <Typography variant="h6">
+                                    יום {dayIndex + 1}
+                                </Typography>
+                                {formData.dailyLocations.length > 1 && (
+                                    <IconButton
+                                        onClick={() => handleRemoveDay(dayIndex)}
+                                        color="error"
+                                        size="small"
+                                    >
+                                        <DeleteIcon />
+                                    </IconButton>
+                                )}
+                            </Box>
+                            
+                            {/* מיקומים של היום */}
+                            {Array.isArray(day.locations) && day.locations.map((location, locationIndex) => (
+                                <Box key={`location-${dayIndex}-${locationIndex}`} sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <Autocomplete
+                                        fullWidth
+                                        value={location}
+                                        onChange={(event, newValue) => handleLocationChange(dayIndex, locationIndex, newValue)}
+                                        onInputChange={(event, newInputValue) => {
+                                          if (newInputValue) {
+                                            searchLocations(newInputValue);
+                                          }
+                                        }}
+                                        isOptionEqualToValue={(option, value) => {
+                                          // אם שניהם null או undefined
+                                          if (!option && !value) return true;
+                                          // אם רק אחד מהם null או undefined
+                                          if (!option || !value) return false;
+                                          // השוואה לפי id
+                                          return option.id === value.id;
+                                        }}
+                                        options={locations}
+                                        getOptionLabel={(option) => option?.name || ''}
+                                        renderInput={(params) => (
+                                          <TextField
+                                            {...params}
+                                            label={locationIndex === 0 ? 'נקודת התחלה' : 
+                                                   locationIndex === day.locations.length - 1 ? 'נקודת סיום' :
+                                                   `נקודת ביניים ${locationIndex}`}
+                                            error={!location}
+                                            helperText={!location ? 'נדרש מיקום' : ''}
+                                            InputProps={{
+                                              ...params.InputProps,
+                                              endAdornment: (
+                                                <>
+                                                  {loading ? <CircularProgress color="inherit" size={20} /> : null}
+                                                  {params.InputProps.endAdornment}
+                                                </>
+                                              ),
+                                            }}
+                                          />
+                                        )}
+                                        renderOption={(props, option) => (
+                                          <li {...props}>
+                                            <Box>
+                                              <Typography variant="body1">{option.name}</Typography>
+                                              <Typography variant="body2" color="text.secondary">
+                                                {option.address}
+                                              </Typography>
+                                            </Box>
+                                          </li>
+                                        )}
+                                    />
+                                    {day.locations.length > 1 && (
+                                        <IconButton
+                                            onClick={() => handleRemoveLocation(dayIndex, locationIndex)}
+                                            color="error"
+                                            size="small"
+                                        >
+                                            <DeleteIcon />
+                                        </IconButton>
+                                    )}
+                                </Box>
+                            ))}
+                            
+                            {/* כפתור להוספת מיקום */}
+                            <Button
+                                startIcon={<AddLocationIcon />}
+                                onClick={() => handleAddLocation(dayIndex)}
+                                sx={{ mt: 1 }}
+                            >
+                                הוסף מיקום
+                            </Button>
+                        </Box>
+                    ))}
+
+                    {/* כפתור להוספת יום */}
+                    <Button
+                        variant="contained"
+                        color="primary"
+                        onClick={handleAddDay}
+                        fullWidth
+                        sx={{ mt: 2 }}
+                    >
+                        הוסף יום חדש
+                    </Button>
+                </Box>
 
                 {/* שאר פרטי הטיול */}
                 <Box sx={{ mt: 3 }}>
@@ -291,7 +452,7 @@ const BasicInfo = ({ onSubmit }) => {
                         endDateError={endDateError}
                     />
                 </Box>
-            </Paper>
+            </Box>
 
             <Snackbar 
                 open={!!error} 

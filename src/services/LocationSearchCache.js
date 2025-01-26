@@ -40,7 +40,11 @@ class LocationSearchCache {
     }
 
     async search(searchText, searchFn) {
-        const cacheKey = searchText.toLowerCase();
+        if (!searchText || typeof searchText !== 'string') {
+            return [];
+        }
+
+        const cacheKey = searchText.toLowerCase().trim();
         
         if (this.cache.has(cacheKey)) {
             console.log('Cache hit for:', searchText);
@@ -48,9 +52,17 @@ class LocationSearchCache {
         }
 
         console.log('Cache miss for:', searchText);
-        const results = await searchFn(searchText);
-        this.cache.set(cacheKey, results);
-        return results;
+        try {
+            const results = await searchFn(searchText);
+            if (results && Array.isArray(results)) {
+                this.cache.set(cacheKey, results);
+                return results;
+            }
+            return [];
+        } catch (error) {
+            console.error('Error in location search:', error);
+            return [];
+        }
     }
 
     clear() {
