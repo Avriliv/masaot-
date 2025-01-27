@@ -68,3 +68,45 @@ This section has moved here: [https://facebook.github.io/create-react-app/docs/d
 ### `npm run build` fails to minify
 
 This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+
+## Setting up Local OSRM Server
+
+To use local routing for hiking trails, you'll need to set up a local OSRM server:
+
+1. Install Docker Desktop from [https://www.docker.com/products/docker-desktop/](https://www.docker.com/products/docker-desktop/)
+
+2. Download the latest Israel OSM data:
+```bash
+mkdir osrm-data
+cd osrm-data
+curl -o israel-and-palestine-latest.osm.pbf https://download.geofabrik.de/asia/israel-and-palestine-latest.osm.pbf
+```
+
+3. Run the OSRM Docker container:
+```bash
+docker run -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-extract -p /opt/foot.lua /data/israel-and-palestine-latest.osm.pbf
+docker run -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-partition /data/israel-and-palestine-latest.osrm
+docker run -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-customize /data/israel-and-palestine-latest.osrm
+```
+
+4. Start the routing server:
+```bash
+docker run -t -i -p 5000:5000 -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend osrm-routed --algorithm mld /data/israel-and-palestine-latest.osrm
+```
+
+The server will be available at `http://localhost:5000`. The application will automatically use it when available.
+
+## Credits and Licenses
+
+This project uses several open-source components:
+
+### Map Data and Services
+- **OpenStreetMap**: Map data  OpenStreetMap contributors, available under the [Open Database License (ODbL)](https://www.openstreetmap.org/copyright)
+- **Israel Hiking Map**: Map style and routing services provided by [Israel Hiking Map](https://israelhiking.osm.org.il)
+
+### Software Components
+- **OSRM**: Routing engine available under the [BSD 2-Clause License](https://github.com/Project-OSRM/osrm-backend/blob/master/LICENSE.TXT)
+- **React**: UI framework available under the [MIT License](https://github.com/facebook/react/blob/main/LICENSE)
+- **Leaflet**: Mapping library available under the [BSD 2-Clause License](https://github.com/Leaflet/Leaflet/blob/main/LICENSE)
+
+Per the requirements of these licenses, any modifications or improvements to the map data should be shared back with the OpenStreetMap community.

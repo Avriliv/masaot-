@@ -199,7 +199,10 @@ const BasicInfo = ({ onSubmit }) => {
                 q: searchText,
                 format: 'json',
                 limit: 10,
-                countrycodes: 'il'
+                countrycodes: 'il',
+                viewbox: '34.2674,33.4356,35.8950,29.4533', // תיחום גיאוגרפי של ישראל
+                bounded: 1, // מגביל תוצאות לתוך התיחום
+                'accept-language': 'he'
             }).toString();
 
             const response = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
@@ -219,7 +222,7 @@ const BasicInfo = ({ onSubmit }) => {
                 id: item.place_id,
                 name: item.display_name.split(',')[0],
                 address: item.display_name,
-                coordinates: [parseFloat(item.lat), parseFloat(item.lon)], // שמירה כ-[lat, lon]
+                coordinates: [parseFloat(item.lon), parseFloat(item.lat)], // שמירה כ-[lon, lat]
                 type: item.type
             }));
 
@@ -361,51 +364,37 @@ const BasicInfo = ({ onSubmit }) => {
                                 <Box key={`location-${dayIndex}-${locationIndex}`} sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
                                     <Autocomplete
                                         fullWidth
-                                        value={location}
+                                        value={formData.dailyLocations[dayIndex]?.locations[locationIndex] || null}
                                         onChange={(event, newValue) => handleLocationChange(dayIndex, locationIndex, newValue)}
-                                        onInputChange={(event, newInputValue) => {
-                                          if (newInputValue) {
-                                            searchLocations(newInputValue);
-                                          }
-                                        }}
-                                        isOptionEqualToValue={(option, value) => {
-                                          // אם שניהם null או undefined
-                                          if (!option && !value) return true;
-                                          // אם רק אחד מהם null או undefined
-                                          if (!option || !value) return false;
-                                          // השוואה לפי id
-                                          return option.id === value.id;
-                                        }}
                                         options={locations}
                                         getOptionLabel={(option) => option?.name || ''}
+                                        isOptionEqualToValue={(option, value) => 
+                                            option?.id === value?.id || 
+                                            (option?.coordinates?.[0] === value?.coordinates?.[0] && 
+                                             option?.coordinates?.[1] === value?.coordinates?.[1])
+                                        }
                                         renderInput={(params) => (
-                                          <TextField
-                                            {...params}
-                                            label={locationIndex === 0 ? 'נקודת התחלה' : 
-                                                   locationIndex === day.locations.length - 1 ? 'נקודת סיום' :
-                                                   `נקודת ביניים ${locationIndex}`}
-                                            error={!location}
-                                            helperText={!location ? 'נדרש מיקום' : ''}
-                                            InputProps={{
-                                              ...params.InputProps,
-                                              endAdornment: (
-                                                <>
-                                                  {loading ? <CircularProgress color="inherit" size={20} /> : null}
-                                                  {params.InputProps.endAdornment}
-                                                </>
-                                              ),
-                                            }}
-                                          />
+                                            <TextField
+                                                {...params}
+                                                label={locationIndex === 0 ? 'נקודת התחלה' : 
+                                                       locationIndex === formData.dailyLocations[dayIndex]?.locations.length - 1 ? 'נקודת סיום' :
+                                                       `נקודת ביניים ${locationIndex}`}
+                                                variant="outlined"
+                                                onChange={(e) => {
+                                                    searchLocations(e.target.value);
+                                                }}
+                                                error={!formData.dailyLocations[dayIndex]?.locations[locationIndex]}
+                                                helperText={!formData.dailyLocations[dayIndex]?.locations[locationIndex] ? 'נדרש מיקום' : ''}
+                                            />
                                         )}
+                                        loading={loading}
                                         renderOption={(props, option) => (
-                                          <li {...props}>
-                                            <Box>
-                                              <Typography variant="body1">{option.name}</Typography>
-                                              <Typography variant="body2" color="text.secondary">
-                                                {option.address}
-                                              </Typography>
-                                            </Box>
-                                          </li>
+                                            <li {...props}>
+                                                <Typography>{option.name}</Typography>
+                                                <Typography variant="caption" sx={{ ml: 1, color: 'text.secondary' }}>
+                                                    {option.address}
+                                                </Typography>
+                                            </li>
                                         )}
                                     />
                                     {day.locations.length > 1 && (

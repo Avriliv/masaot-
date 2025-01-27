@@ -1,55 +1,83 @@
-import React, { memo } from 'react';
-import { Autocomplete, TextField, CircularProgress, Typography } from '@mui/material';
+import React, { memo, useState } from 'react';
+import { Autocomplete, TextField, CircularProgress } from '@mui/material';
+import LocationSearchService from '../../services/LocationSearchService';
 
 const LocationAutocomplete = memo(({ 
     label, 
     value, 
     onChange, 
-    error, 
-    helperText, 
-    locations, 
-    loading, 
-    onInputChange 
+    error,
+    helperText,
+    locations,
+    loading: externalLoading,
+    onInputChange: externalOnInputChange 
 }) => {
+    const [options, setOptions] = useState([]);
+    const [inputValue, setInputValue] = useState('');
+    const [loading, setLoading] = useState(false);
+
+    const handleInputChange = async (event, newInputValue) => {
+        setInputValue(newInputValue);
+        
+        if (newInputValue.length >= 2) {
+            setLoading(true);
+            try {
+                const results = await LocationSearchService.search(newInputValue);
+                setOptions(results);
+            } catch (error) {
+                console.error('Error searching locations:', error);
+                setOptions([]);
+            } finally {
+                setLoading(false);
+            }
+        } else {
+            setOptions([]);
+        }
+
+        // אם יש פונקצית onInputChange חיצונית, נקרא לה
+        if (externalOnInputChange) {
+            externalOnInputChange(event, newInputValue);
+        }
+    };
+
     const handleChange = (event, newValue) => {
-        // מעביר את כל האובייקט כמו שהוא
         onChange(newValue);
+    };
+
+    // פונקציה להשוואת ערכים
+    const isOptionEqualToValue = (option, value) => {
+        if (!option || !value) return false;
+        
+        // השוואה לפי id
+        if (option.id && value.id) {
+            return option.id === value.id;
+        }
+        
+        // השוואה לפי קואורדינטות
+        if (option.coordinates && value.coordinates) {
+            return option.coordinates[0] === value.coordinates[0] &&
+                   option.coordinates[1] === value.coordinates[1];
+        }
+        
+        // השוואה לפי שם
+        return option.name === value.name;
     };
 
     return (
         <Autocomplete
             value={value}
             onChange={handleChange}
-            onInputChange={onInputChange}
-            options={locations || []}
-            loading={loading}
+            inputValue={inputValue}
+            onInputChange={handleInputChange}
+            options={locations || options}
+            loading={externalLoading || loading}
             getOptionLabel={(option) => option?.name || ''}
-            isOptionEqualToValue={(option, value) => {
-                // אם אחד מהערכים ריק
-                if (!option || !value) return false;
-                
-                // השוואה לפי id
-                if (option.id && value.id) {
-                    return option.id === value.id;
-                }
-                
-                // השוואה לפי קואורדינטות
-                if (option.coordinates && value.coordinates) {
-                    return option.coordinates[0] === value.coordinates[0] &&
-                           option.coordinates[1] === value.coordinates[1];
-                }
-                
-                // השוואה לפי שם ומיקום
-                return option.name === value.name && 
-                       option.address === value.address;
-            }}
+            isOptionEqualToValue={isOptionEqualToValue}
             renderOption={(props, option) => (
                 <li {...props}>
                     <div>
-                        <Typography variant="body1">{option.name}</Typography>
-                        <Typography variant="body2" color="textSecondary">
-                            {option.address}
-                        </Typography>
+                        <div>{option.name}</div>
+                        <div style={{ fontSize: '0.8em', color: 'gray' }}>{option.address}</div>
                     </div>
                 </li>
             )}
@@ -57,27 +85,21 @@ const LocationAutocomplete = memo(({
                 <TextField
                     {...params}
                     label={label}
-                    variant="outlined"
-                    fullWidth
                     error={error}
                     helperText={helperText}
                     InputProps={{
                         ...params.InputProps,
                         endAdornment: (
-                            <>
-                                {loading ? <CircularProgress color="inherit" size={20} /> : null}
+                            <React.Fragment>
+                                {(externalLoading || loading) ? <CircularProgress color="inherit" size={20} /> : null}
                                 {params.InputProps.endAdornment}
-                            </>
+                            </React.Fragment>
                         ),
                     }}
                 />
             )}
-            noOptionsText="לא נמצאו תוצאות"
-            loadingText="מחפש..."
         />
     );
 });
-
-LocationAutocomplete.displayName = 'LocationAutocomplete';
 
 export default LocationAutocomplete;

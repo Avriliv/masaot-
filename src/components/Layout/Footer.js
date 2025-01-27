@@ -21,6 +21,12 @@ const Footer = () => {
                     {new Date().getFullYear()}
                     {' מסעות - מערכת לתכנון וניהול טיולים חינוכיים'}
                 </Typography>
+                <Typography variant="body2" color="text.secondary" align="center" sx={{ mt: 1 }}>
+                    {'מפות באדיבות '}
+                    <a href="https://www.openstreetmap.org/copyright" style={{ color: 'inherit' }}>OpenStreetMap</a>
+                    {' ו'}
+                    <a href="https://israelhiking.osm.org.il" style={{ color: 'inherit' }}>Israel Hiking Map</a>
+                </Typography>
             </Container>
         </Box>
     );

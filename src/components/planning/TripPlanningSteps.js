@@ -55,32 +55,52 @@ const TripPlanningSteps = () => {
     const CurrentStepComponent = steps[activeStep].component;
 
     return (
-        <Box sx={{ width: '100%', p: 3 }}>
-            <Stepper activeStep={activeStep} alternativeLabel>
-                {steps.map((step, index) => (
-                    <Step key={step.label}>
-                        <StepLabel>{step.label}</StepLabel>
-                    </Step>
-                ))}
-            </Stepper>
-            <Box sx={{ mt: 4 }}>
+        <Box sx={{ 
+            width: '100%', 
+            height: '100vh', 
+            display: 'flex', 
+            flexDirection: 'column'
+        }}>
+            <Box sx={{ p: 2 }}>
+                <Stepper activeStep={activeStep} alternativeLabel>
+                    {steps.map((step, index) => (
+                        <Step key={step.label}>
+                            <StepLabel>{step.label}</StepLabel>
+                        </Step>
+                    ))}
+                </Stepper>
+            </Box>
+            
+            <Box sx={{ 
+                flexGrow: 1, 
+                display: 'flex', 
+                flexDirection: 'column',
+                position: 'relative',
+                minHeight: 0 // חשוב בשביל שהמפה תקבל את הגובה הנכון
+            }}>
                 <CurrentStepComponent />
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 2 }}>
-                    <Button
-                        color="inherit"
-                        disabled={activeStep === 0}
-                        onClick={handleBack}
-                    >
-                        חזור
-                    </Button>
-                    <Button
-                        variant="contained"
-                        onClick={handleNext}
-                        disabled={!steps[activeStep].validation(state)}
-                    >
-                        {activeStep === steps.length - 1 ? 'סיים' : 'הבא'}
-                    </Button>
-                </Box>
+            </Box>
+
+            <Box sx={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                p: 2,
+                borderTop: '1px solid rgba(0, 0, 0, 0.12)'
+            }}>
+                <Button
+                    color="inherit"
+                    disabled={activeStep === 0}
+                    onClick={handleBack}
+                >
+                    חזור
+                </Button>
+                <Button
+                    variant="contained"
+                    onClick={handleNext}
+                    disabled={!steps[activeStep].validation(state)}
+                >
+                    {activeStep === steps.length - 1 ? 'סיים' : 'הבא'}
+                </Button>
             </Box>
         </Box>
     );

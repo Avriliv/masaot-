@@ -36,6 +36,7 @@ const initialState = {
 const tripReducer = (state, action) => {
     switch (action.type) {
         case 'SET_BASIC_DETAILS':
+            console.log('Updating basic details:', action.payload);
             return {
                 ...state,
                 basicDetails: action.payload
@@ -49,6 +50,7 @@ const tripReducer = (state, action) => {
                 }
             };
         case 'UPDATE_DAILY_ROUTES':
+            console.log('Updating daily routes:', action.payload);
             return {
                 ...state,
                 route: {
@@ -90,13 +92,13 @@ export const TripProvider = ({ children }) => {
         });
     }, [dispatch]);
 
-    const updateRoute = (route) => {
+    const updateRoute = useCallback((route) => {
         dispatch({ type: 'UPDATE_ROUTE', payload: route });
-    };
+    }, []);
 
-    const updateDailyRoutes = (routes) => {
+    const updateDailyRoutes = useCallback((routes) => {
         dispatch({ type: 'UPDATE_DAILY_ROUTES', payload: routes });
-    };
+    }, []);
 
     const updateStep = (step) => {
         dispatch({ type: 'UPDATE_STEP', payload: step });

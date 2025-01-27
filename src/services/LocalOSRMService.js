@@ -1,159 +1,145 @@
 import { decode } from '@mapbox/polyline';
+import { isValidCoordinates, isPointInIsrael } from './MapService';
 
-const ISRAEL_HIKING_API_BASE = 'https://israelhiking.osm.org.il/api/v2'; // updated API version
-const OSRM_API_BASE = 'https://routing.openstreetmap.de/routed-foot';
+// עדכון כתובות השרתים
+const OSRM_SERVER = 'http://localhost:5000';  // השרת המקומי שלנו
+const FALLBACK_SERVER = 'https://routing.openstreetmap.de/routed-foot';  // שרת גיבוי
 
 // בדיקת זמינות השרת המקומי
-export const checkLocalServerAvailability = async () => {
-    try {
-        const response = await fetch(`${ISRAEL_HIKING_API_BASE}/routing/iht/35.2137,31.7683/35.2137,31.7683`);
-        const data = await response.json();
-        
-        if (!response.ok || !data.features) {
-            throw new Error('Israel Hiking API server is not responding correctly');
-        }
-        
-        console.log('Israel Hiking API server is available');
-        return true;
-    } catch (error) {
-        console.warn('Israel Hiking API server is not available:', error);
-        return false;
-    }
+const checkLocalServerAvailability = async () => {
+  try {
+    const response = await fetch(`${OSRM_SERVER}/health`);
+    return response.ok;
+  } catch (error) {
+    console.warn('Local OSRM server not available:', error);
+    return false;
+  }
 };
 
-// פונקציה לנירמול קואורדינטות
-const normalizeCoordinates = (coords) => {
-    if (!coords) return null;
-    
-    // אם זה מערך
-    if (Array.isArray(coords)) {
-        if (coords.length !== 2) return null;
-        return coords;
+// בדיקת זמינות השרת הציבורי
+export const checkPublicServerAvailability = async () => {
+  try {
+    console.log('בודק זמינות שרת OSRM ציבורי...');
+    const testCoords = '35.2137,31.7683;35.2137,31.7684';
+    const testUrl = `${FALLBACK_SERVER}/route/v1/foot/${testCoords}`;
+    console.log('שולח בקשת בדיקה ל:', testUrl);
+
+    const response = await fetch(testUrl);
+    console.log('קוד תשובה:', response.status);
+
+    const data = await response.json();
+    console.log('תשובה התקבלה:', data);
+
+    if (response.ok && data.code === 'Ok') {
+      console.log('שרת OSRM ציבורי זמין ועובד!');
+      return true;
     }
-    
-    // אם זה אובייקט עם lat/lng
-    if (coords.lat !== undefined && coords.lng !== undefined) {
-        return [coords.lng, coords.lat];
-    }
-    
-    // אם זה אובייקט עם lat/lon
-    if (coords.lat !== undefined && coords.lon !== undefined) {
-        return [coords.lon, coords.lat];
-    }
-    
+
+    console.warn('שרת OSRM ציבורי לא מגיב כראוי');
+    return false;
+  } catch (error) {
+    console.error('שגיאה בבדיקת זמינות שרת OSRM ציבורי:', error);
+    return false;
+  }
+};
+
+// מטמון לתוצאות חישוב מסלולים
+const routeCache = new Map();
+const CACHE_EXPIRY = 1000 * 60 * 60; // שעה אחת
+
+// פונקציה לחישוב מפתח מטמון
+const getCacheKey = (startCoords, endCoords, waypoints = []) => {
+  const points = [startCoords, ...waypoints, endCoords]
+    .map(coords => coords.join(','))
+    .join(';');
+  return points;
+};
+
+// המרת קואורדינטות לפורמט OSRM
+const convertToOSRMFormat = (coords) => {
+  if (!coords || !Array.isArray(coords) || coords.length !== 2) {
+    console.warn('Invalid coordinates:', coords);
     return null;
+  }
+
+  const [lon, lat] = coords;
+  if (typeof lon !== 'number' || typeof lat !== 'number' || isNaN(lon) || isNaN(lat)) {
+    console.warn('Invalid coordinate values:', { lon, lat });
+    return null;
+  }
+
+  return [lon, lat];
 };
 
-// פונקציה לבדיקת תקינות קואורדינטות
-const isValidCoordinates = (coords) => {
-    const normalized = normalizeCoordinates(coords);
-    if (!normalized) return false;
-    
-    const [lon, lat] = normalized;
-    return !isNaN(lon) && !isNaN(lat) &&
-           lon >= -180 && lon <= 180 &&
-           lat >= -90 && lat <= 90;
-};
+// חישוב מסלול בין שתי נקודות
+export const getMarkedTrailRoute = async ({ start, end, waypoints = [] }) => {
+  console.log('getMarkedTrailRoute called with:', { start, end, waypoints });
 
-// פונקציה לבדיקה אם נקודה בתוך ישראל
-const isPointInIsrael = (coords) => {
-    const normalized = normalizeCoordinates(coords);
-    if (!normalized) return false;
-    
-    const [lon, lat] = normalized;
-    return lat >= 29.5 && lat <= 33.3 && // גבולות הרוחב של ישראל
-           lon >= 34.2 && lon <= 35.9;    // גבולות האורך של ישראל
-};
+  // וידוא שהקואורדינטות תקינות
+  if (!start || !end || !Array.isArray(start) || !Array.isArray(end) || start.length !== 2 || end.length !== 2) {
+    console.error('Invalid coordinates:', { start, end });
+    throw new Error('קואורדינטות לא תקינות');
+  }
 
-// פונקציה להמרת קואורדינטות למחרוזת עבור Israel Hiking API
-const formatCoordinatesForAPI = (coords) => {
-    if (!coords) return null;
-    
-    let lat, lon;
-    
-    // אם זה מערך [lon, lat]
-    if (Array.isArray(coords)) {
-        [lon, lat] = coords;
+  // וידוא שהערכים הם מספרים
+  if (!start.every(coord => typeof coord === 'number' && !isNaN(coord)) || 
+      !end.every(coord => typeof coord === 'number' && !isNaN(coord))) {
+    console.error('Coordinates contain non-numeric values:', { start, end });
+    throw new Error('קואורדינטות מכילות ערכים לא מספריים');
+  }
+
+  try {
+    // בדיקת המטמון
+    const cacheKey = getCacheKey(start, end, waypoints);
+    const cachedRoute = routeCache.get(cacheKey);
+    if (cachedRoute && Date.now() - cachedRoute.timestamp < CACHE_EXPIRY) {
+      console.log('Returning cached route');
+      return cachedRoute.route;
     }
-    // אם זה אובייקט עם lat/lng
-    else if (coords.lat !== undefined && coords.lng !== undefined) {
-        lat = coords.lat;
-        lon = coords.lng;
+
+    // בדיקת זמינות השרת המקומי
+    const isLocalServerAvailable = await checkLocalServerAvailability();
+    const serverToUse = isLocalServerAvailable ? OSRM_SERVER : FALLBACK_SERVER;
+    console.log(`Using OSRM server: ${serverToUse}`);
+
+    // הקואורדינטות כבר בפורמט [lon, lat]
+    const coordinates = [start, ...waypoints, end];
+    console.log('Coordinates for OSRM:', coordinates);
+
+    const coordinateString = coordinates
+      .map(coord => coord.join(','))
+      .join(';');
+
+    const url = `${serverToUse}/route/v1/foot/${coordinateString}?overview=full&geometries=geojson&annotations=true`;
+    console.log('OSRM URL:', url);
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`OSRM request failed: ${response.status} ${response.statusText}`);
     }
-    // אם זה אובייקט עם lat/lon
-    else if (coords.lat !== undefined && coords.lon !== undefined) {
-        lat = coords.lat;
-        lon = coords.lon;
+
+    const data = await response.json();
+    console.log('OSRM response:', data);
+
+    if (!data.routes || !data.routes[0]) {
+      throw new Error('לא נמצא מסלול');
     }
-    else {
-        return null;
-    }
-    
-    return `${lat},${lon}`;
-};
 
-// שירות לחישוב מסלולים
-export const getMarkedTrailRoute = async (startCoords, endCoords, waypoints = []) => {
-    try {
-        console.log('Input coordinates:', { startCoords, endCoords, waypoints });
+    // שמירה במטמון
+    const route = data.routes[0];
+    routeCache.set(cacheKey, {
+      route,
+      timestamp: Date.now()
+    });
 
-        // המרת הקואורדינטות לפורמט הנכון [lat, lon] -> [lon, lat]
-        const formatCoords = ([lat, lon]) => `${lon},${lat}`;
-        
-        // בניית מערך של כל הנקודות
-        const coordinates = [
-            formatCoords(startCoords),
-            ...waypoints.map(formatCoords),
-            formatCoords(endCoords)
-        ].join(';');
-
-        // בניית ה-URL
-        const url = `${OSRM_API_BASE}/route/v1/foot/${coordinates}?steps=true&geometries=geojson&overview=full`;
-
-        console.log('Requesting OSRM route:', url);
-
-        const response = await fetch(url);
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('API Error:', errorText);
-            throw new Error(`Failed to get route: ${response.status} - ${errorText}`);
-        }
-
-        const data = await response.json();
-        console.log('API Response:', data);
-
-        if (!data.routes || !data.routes.length) {
-            throw new Error('No routes found in response');
-        }
-
-        const route = data.routes[0];
-        
-        // המרת הנקודות לפורמט הנכון
-        return {
-            type: 'Feature',
-            geometry: {
-                type: 'LineString',
-                coordinates: route.geometry.coordinates.map(([lon, lat]) => [lat, lon])
-            },
-            properties: {
-                distance: route.distance || 0, // במטרים
-                time: route.duration || 0 // בשניות
-            }
-        };
-
-    } catch (error) {
-        console.error('Error in getMarkedTrailRoute:', error);
-        throw error;
-    }
+    return route;
+  } catch (error) {
+    console.error('Error in getMarkedTrailRoute:', error);
+    throw error;
+  }
 };
 
 // הפונקציה הראשית לחישוב מסלול
 export const getLocalRoute = async (startCoords, endCoords, waypoints = []) => {
-    try {
-        return await getMarkedTrailRoute(startCoords, endCoords, waypoints);
-    } catch (error) {
-        console.error('Error in getLocalRoute:', error);
-        throw error;
-    }
+  return getMarkedTrailRoute({ start: startCoords, end: endCoords, waypoints });
 };
