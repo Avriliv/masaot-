@@ -55,12 +55,7 @@ const TripPlanningSteps = () => {
     const CurrentStepComponent = steps[activeStep].component;
 
     return (
-        <Box sx={{ 
-            width: '100%', 
-            height: '100vh', 
-            display: 'flex', 
-            flexDirection: 'column'
-        }}>
+        <Box sx={{ width: '100%' }}>
             <Box sx={{ p: 2 }}>
                 <Stepper activeStep={activeStep} alternativeLabel>
                     {steps.map((step, index) => (
@@ -71,21 +66,14 @@ const TripPlanningSteps = () => {
                 </Stepper>
             </Box>
             
-            <Box sx={{ 
-                flexGrow: 1, 
-                display: 'flex', 
-                flexDirection: 'column',
-                position: 'relative',
-                minHeight: 0 // חשוב בשביל שהמפה תקבל את הגובה הנכון
-            }}>
+            <Box sx={{ p: 2 }}>
                 <CurrentStepComponent />
             </Box>
 
             <Box sx={{ 
                 display: 'flex', 
                 justifyContent: 'space-between', 
-                p: 2,
-                borderTop: '1px solid rgba(0, 0, 0, 0.12)'
+                p: 2
             }}>
                 <Button
                     color="inherit"

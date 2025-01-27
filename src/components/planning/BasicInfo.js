@@ -65,26 +65,42 @@ const BasicInfo = ({ onSubmit }) => {
         return option.id === value.id;
     }, []);
 
+    // חישוב מספר הימים בין שני תאריכים
+    const calculateDays = (startDate, endDate) => {
+        if (!startDate || !endDate) return 0;
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        const diffTime = Math.abs(end - start);
+        return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 כי כולל את יום ההתחלה
+    };
+
     // טיפול בשינוי שדות
     const handleInputChange = useCallback((field) => (value) => {
         setFormData(prevData => {
-            // אם אין שינוי בערך, לא לעדכן את ה-state
-            if (prevData[field] === value) {
-                return prevData;
-            }
-
             const newData = {
                 ...prevData,
                 [field]: value
             };
 
-            // אם יש תאריך התחלה וסיום, נוודא שיש יום ראשון עם שני מיקומים
-            if ((field === 'startDate' || field === 'endDate') && 
-                newData.startDate && newData.endDate && 
-                (!newData.dailyLocations || newData.dailyLocations.length === 0)) {
-                newData.dailyLocations = [{
-                    locations: [null, null] // מיקום התחלה וסיום
-                }];
+            // אם שונה אחד התאריכים, נעדכן את מספר הימים
+            if (field === 'startDate' || field === 'endDate') {
+                const numDays = calculateDays(
+                    field === 'startDate' ? value : prevData.startDate,
+                    field === 'endDate' ? value : prevData.endDate
+                );
+
+                // אם יש תאריך התחלה וסיום תקינים
+                if (numDays > 0) {
+                    // ניצור מערך של ימים
+                    newData.dailyLocations = Array(numDays).fill(null).map((_, index) => {
+                        // נשמור על המיקומים הקיימים אם יש
+                        const existingDay = prevData.dailyLocations?.[index];
+                        return {
+                            locations: existingDay?.locations || [],
+                            date: new Date(new Date(newData.startDate).getTime() + index * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+                        };
+                    });
+                }
             }
 
             return newData;

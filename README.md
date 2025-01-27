@@ -96,6 +96,29 @@ docker run -t -i -p 5000:5000 -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backen
 
 The server will be available at `http://localhost:5000`. The application will automatically use it when available.
 
+## הפעלת האפליקציה
+
+יש שתי דרכים להפעיל את האפליקציה:
+
+### 1. הפעלה אוטומטית (מומלץ)
+פשוט הפעל את הקובץ `start-app.bat` על ידי לחיצה כפולה. הקובץ יפעיל את:
+- קונטיינר OSRM לחישוב מסלולים
+- קונטיינר שירות גבהים
+- אפליקציית React
+
+### 2. הפעלה ידנית
+אם אתה רוצה להפעיל כל שירות בנפרד:
+
+1. הפעל את הקונטיינרים:
+```bash
+docker-compose up
+```
+
+2. הפעל את האפליקציה:
+```bash
+npm start
+```
+
 ## Credits and Licenses
 
 This project uses several open-source components:

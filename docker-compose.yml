@@ -1,0 +1,16 @@
+version: '3'
+services:
+  osrm-backend:
+    image: osrm/osrm-backend
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/data
+    command: "osrm-routed --algorithm mld /data/israel-and-palestine-latest.osrm"
+    restart: unless-stopped
+
+  elevation-service:
+    image: nfedyashev/open-elevation
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
